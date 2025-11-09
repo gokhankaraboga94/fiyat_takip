@@ -747,6 +747,17 @@
                                     <input type="number" id="partPrice" placeholder="0.00" step="0.01" required>
                                 </div>
                             </div>
+                            
+                            <!-- Apple Özel Alanı -->
+                            <div id="appleSpecialFields" class="form-group" style="display: none;">
+                                <label for="partQuality">Parça Kalitesi</label>
+                                <select id="partQuality">
+                                    <option value="">-- Seçim Yapın --</option>
+                                    <option value="orijinal">Orijinal</option>
+                                    <option value="yan-sanayi">Yan Sanayi</option>
+                                </select>
+                            </div>
+                            
                             <button type="submit" class="btn btn-success">✓ Parça Ekle</button>
                         </form>
                     </div>
@@ -763,6 +774,7 @@
                                         <th>Marka</th>
                                         <th>Model</th>
                                         <th>Parça</th>
+                                        <th>Kalite</th>
                                         <th>Fiyat</th>
                                         <th>İşlem</th>
                                     </tr>
@@ -797,6 +809,16 @@
                     <div class="form-group" id="partsGroup" style="display: none;">
                         <label>Parça Seçin (En az 1, en fazla 3)</label>
                         <div class="checkbox-group" id="partsList"></div>
+                    </div>
+                    
+                    <!-- Apple Özel Kalite Seçimi -->
+                    <div class="form-group" id="appleQualityGroup" style="display: none;">
+                        <label for="userPartQuality">🍎 Apple Parça Kalitesi</label>
+                        <select id="userPartQuality" required>
+                            <option value="">-- Kalite Seçin --</option>
+                            <option value="orijinal">Orijinal</option>
+                            <option value="yan-sanayi">Yan Sanayi</option>
+                        </select>
                     </div>
 
                     <button id="calculateBtn" class="btn btn-primary" style="display: none;">💰 Fiyat Hesapla</button>
@@ -928,16 +950,25 @@
             const password = document.getElementById('newUserPassword').value;
 
             try {
+                // Firebase REST API kullanarak kullanıcı oluşturma
                 const response = await fetch('https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=' + firebaseConfig.apiKey, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email, password, returnSecureToken: true })
+                    body: JSON.stringify({ 
+                        email, 
+                        password, 
+                        returnSecureToken: false // Token gereksiz, sadece kullanıcı oluştur
+                    })
                 });
 
-                if (response.ok) {
+                const data = await response.json();
+                
+                if (data.email) {
                     showAlert('userAlert', 'Kullanıcı başarıyla eklendi!', 'success');
                     document.getElementById('addUserForm').reset();
                     loadUsers();
+                } else if (data.error) {
+                    throw new Error(data.error.message);
                 } else {
                     throw new Error('Kullanıcı eklenemedi');
                 }
@@ -948,17 +979,27 @@
 
         // Load Users
         async function loadUsers() {
-            try {
-                const response = await fetch('https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=' + firebaseConfig.apiKey, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ idToken: await auth.currentUser.getIdToken() })
-                });
+            const tbody = document.getElementById('usersList');
+            tbody.innerHTML = '<tr><td colspan="2">Kullanıcı listesi API ile yüklenemez</td></tr>';
+        }
 
-                const tbody = document.getElementById('usersList');
-                tbody.innerHTML = '<tr><td colspan="2">Yükleniyor...</td></tr>';
-            } catch (error) {
-                console.error('Kullanıcılar yüklenemedi:', error);
+        // Apple marka ve parça kontrolü için event listener (ADMIN)
+        document.getElementById('partBrand').addEventListener('input', checkAppleSpecialFields);
+        document.getElementById('partName').addEventListener('input', checkAppleSpecialFields);
+
+        function checkAppleSpecialFields() {
+            const brand = document.getElementById('partBrand').value.toLowerCase();
+            const partName = document.getElementById('partName').value.toLowerCase();
+            const specialField = document.getElementById('appleSpecialFields');
+            
+            // Apple marka ve (ekran veya batarya) kontrolü
+            if (brand.includes('apple') && (partName.includes('ekran') || partName.includes('batarya'))) {
+                specialField.style.display = 'block';
+                document.getElementById('partQuality').required = true;
+            } else {
+                specialField.style.display = 'none';
+                document.getElementById('partQuality').required = false;
+                document.getElementById('partQuality').value = '';
             }
         }
 
@@ -969,18 +1010,32 @@
             const model = document.getElementById('partModel').value;
             const name = document.getElementById('partName').value;
             const price = parseFloat(document.getElementById('partPrice').value);
+            const quality = document.getElementById('partQuality').value;
 
             try {
-                await database.ref('parts').push({
+                const partData = {
                     brand,
                     model,
                     name,
                     price,
                     createdAt: Date.now()
-                });
+                };
+                
+                // Apple + (ekran veya batarya) ise kalite bilgisi ekle
+                if (brand.toLowerCase().includes('apple') && 
+                    (name.toLowerCase().includes('ekran') || name.toLowerCase().includes('batarya'))) {
+                    if (!quality) {
+                        showAlert('partAlert', 'Apple cihazlar için kalite seçimi zorunludur!', 'error');
+                        return;
+                    }
+                    partData.quality = quality;
+                }
+
+                await database.ref('parts').push(partData);
 
                 showAlert('partAlert', 'Parça başarıyla eklendi!', 'success');
                 document.getElementById('addPartForm').reset();
+                document.getElementById('appleSpecialFields').style.display = 'none';
                 loadPrices();
             } catch (error) {
                 showAlert('partAlert', 'Hata: ' + error.message, 'error');
@@ -996,13 +1051,15 @@
                 snapshot.forEach(child => {
                     const part = child.val();
                     const row = tbody.insertRow();
+                    const qualityText = part.quality ? (part.quality === 'orijinal' ? '🟢 Orijinal' : '🟡 Yan Sanayi') : '-';
                     row.innerHTML = `
                         <td>${part.brand}</td>
                         <td>${part.model}</td>
                         <td>${part.name}</td>
+                        <td>${qualityText}</td>
                         <td>${part.price.toFixed(2)} ₺</td>
                         <td>
-                            <button class="btn btn-danger btn-small" onclick="deletePart('${child.key}')">Sil</button>
+                            <button class="btn btn-danger btn-small" onclick="deletePart('${child.key}')">🗑️ Sil</button>
                         </td>
                     `;
                 });
@@ -1076,6 +1133,7 @@
             
             if (!model) {
                 document.getElementById('partsGroup').style.display = 'none';
+                document.getElementById('appleQualityGroup').style.display = 'none';
                 document.getElementById('calculateBtn').style.display = 'none';
                 document.getElementById('priceResult').style.display = 'none';
                 return;
@@ -1095,20 +1153,61 @@
                 parts.forEach(part => {
                     const div = document.createElement('div');
                     div.className = 'checkbox-item';
+                    const qualityLabel = part.quality ? ` (${part.quality === 'orijinal' ? '🟢 Orijinal' : '🟡 Yan Sanayi'})` : '';
                     div.innerHTML = `
-                        <input type="checkbox" id="part_${part.key}" value="${part.key}" onchange="validatePartSelection()">
+                        <input type="checkbox" id="part_${part.key}" value="${part.key}" data-part-name="${part.name}" onchange="validatePartSelection()">
                         <label for="part_${part.key}" style="margin: 0; cursor: pointer; flex: 1;">
-                            ${part.name} - ${part.price.toFixed(2)} ₺
+                            ${part.name}${qualityLabel} - ${part.price.toFixed(2)} ₺
                         </label>
                     `;
                     container.appendChild(div);
                 });
 
                 document.getElementById('partsGroup').style.display = 'block';
+                
+                // Apple kontrolü - ekran veya batarya seçilince kalite seçimi göster
+                const isApple = brand.toLowerCase().includes('apple');
+                if (isApple) {
+                    // Checkbox değişikliklerini dinle
+                    document.querySelectorAll('#partsList input[type="checkbox"]').forEach(cb => {
+                        cb.addEventListener('change', checkApplePartSelection);
+                    });
+                }
+                
                 document.getElementById('calculateBtn').style.display = 'block';
                 document.getElementById('priceResult').style.display = 'none';
             });
         });
+
+        // Apple parça seçimi kontrolü
+        function checkApplePartSelection() {
+            const brand = document.getElementById('selectBrand').value;
+            const isApple = brand.toLowerCase().includes('apple');
+            
+            if (!isApple) {
+                document.getElementById('appleQualityGroup').style.display = 'none';
+                return;
+            }
+
+            const checkboxes = document.querySelectorAll('#partsList input[type="checkbox"]:checked');
+            let hasSpecialPart = false;
+
+            checkboxes.forEach(cb => {
+                const partName = cb.getAttribute('data-part-name').toLowerCase();
+                if (partName.includes('ekran') || partName.includes('batarya')) {
+                    hasSpecialPart = true;
+                }
+            });
+
+            if (hasSpecialPart) {
+                document.getElementById('appleQualityGroup').style.display = 'block';
+                document.getElementById('userPartQuality').required = true;
+            } else {
+                document.getElementById('appleQualityGroup').style.display = 'none';
+                document.getElementById('userPartQuality').required = false;
+                document.getElementById('userPartQuality').value = '';
+            }
+        }
 
         // Validate Part Selection
         function validatePartSelection() {
@@ -1122,26 +1221,62 @@
             } else {
                 checkboxes.forEach(cb => cb.disabled = false);
             }
+            
+            // Apple kontrolü
+            checkApplePartSelection();
         }
 
         // Calculate Price
         document.getElementById('calculateBtn').addEventListener('click', async function() {
             const checkboxes = document.querySelectorAll('#partsList input[type="checkbox"]:checked');
+            const brand = document.getElementById('selectBrand').value;
+            const isApple = brand.toLowerCase().includes('apple');
             
             if (checkboxes.length === 0) {
                 showAlert('userAlert', 'Lütfen en az 1 parça seçin!', 'error');
                 return;
             }
 
+            // Apple için kalite kontrolü
+            if (isApple) {
+                let hasSpecialPart = false;
+                checkboxes.forEach(cb => {
+                    const partName = cb.getAttribute('data-part-name').toLowerCase();
+                    if (partName.includes('ekran') || partName.includes('batarya')) {
+                        hasSpecialPart = true;
+                    }
+                });
+
+                if (hasSpecialPart) {
+                    const quality = document.getElementById('userPartQuality').value;
+                    if (!quality) {
+                        showAlert('userAlert', 'Lütfen parça kalitesi seçin!', 'error');
+                        return;
+                    }
+                }
+            }
+
             const partKeys = Array.from(checkboxes).map(cb => cb.value);
+            const selectedQuality = document.getElementById('userPartQuality').value;
             let total = 0;
             const breakdown = [];
 
             for (const key of partKeys) {
                 const snapshot = await database.ref('parts/' + key).once('value');
                 const part = snapshot.val();
-                total += part.price;
-                breakdown.push({ name: part.name, price: part.price });
+                
+                // Apple + (ekran/batarya) için kaliteye göre filtreleme
+                if (isApple && part.quality && 
+                    (part.name.toLowerCase().includes('ekran') || part.name.toLowerCase().includes('batarya'))) {
+                    if (part.quality === selectedQuality) {
+                        total += part.price;
+                        const qualityLabel = part.quality === 'orijinal' ? '🟢 Orijinal' : '🟡 Yan Sanayi';
+                        breakdown.push({ name: `${part.name} (${qualityLabel})`, price: part.price });
+                    }
+                } else {
+                    total += part.price;
+                    breakdown.push({ name: part.name, price: part.price });
+                }
             }
 
             document.getElementById('totalPrice').textContent = total.toFixed(2) + ' ₺';

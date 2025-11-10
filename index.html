@@ -380,6 +380,11 @@
             box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
         }
 
+        .table-container-users {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
         table {
             width: 100%;
             border-collapse: collapse;
@@ -399,6 +404,9 @@
             font-size: 0.85rem;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            position: sticky;
+            top: 0;
+            z-index: 10;
         }
 
         td {
@@ -615,27 +623,6 @@
             gap: 1.5rem;
         }
 
-        /* Quality Badge */
-        .quality-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.375rem;
-            padding: 0.25rem 0.75rem;
-            border-radius: 1rem;
-            font-size: 0.875rem;
-            font-weight: 600;
-        }
-
-        .quality-original {
-            background: #d1fae5;
-            color: #065f46;
-        }
-
-        .quality-aftermarket {
-            background: #fef3c7;
-            color: #92400e;
-        }
-
         /* Responsive */
         @media (max-width: 768px) {
             .navbar-container {
@@ -772,7 +759,21 @@
                         </form>
                     </div>
 
-
+                    <div class="card">
+                        <h2 class="card-title">Kullanıcı Listesi</h2>
+                        <div class="table-container table-container-users">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>E-posta</th>
+                                        <th>Oluşturulma</th>
+                                        <th>İşlem</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="usersList"></tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Parts Tab -->
@@ -981,7 +982,21 @@
             if (user) {
                 currentUser = user;
                 isAdmin = user.uid === ADMIN_UID;
-                showMainApp();
+                
+                // Eğer kullanıcı veritabanında yoksa ve admin değilse çıkış yap
+                if (!isAdmin) {
+                    database.ref('users/' + user.uid).once('value', snapshot => {
+                        if (!snapshot.exists()) {
+                            // Kullanıcı silinmiş, çıkış yap
+                            auth.signOut();
+                            showAlert('loginAlert', 'Hesabınız sistem yöneticisi tarafından kaldırılmış.', 'error');
+                        } else {
+                            showMainApp();
+                        }
+                    });
+                } else {
+                    showMainApp();
+                }
             } else {
                 showLoginPage();
             }
@@ -994,7 +1009,7 @@
             alert.className = `alert alert-${type} show`;
             setTimeout(() => {
                 alert.classList.remove('show');
-            }, 3000);
+            }, 5000);
         }
 
         // Login
@@ -1004,7 +1019,18 @@
             const password = document.getElementById('password').value;
 
             try {
-                await auth.signInWithEmailAndPassword(email, password);
+                const userCredential = await auth.signInWithEmailAndPassword(email, password);
+                const user = userCredential.user;
+                
+                // Admin değilse veritabanında olup olmadığını kontrol et
+                if (user.uid !== ADMIN_UID) {
+                    const snapshot = await database.ref('users/' + user.uid).once('value');
+                    if (!snapshot.exists()) {
+                        // Kullanıcı veritabanında yok, çıkış yap
+                        await auth.signOut();
+                        showAlert('loginAlert', 'Hesabınız bulunamadı veya silinmiş. Lütfen yönetici ile iletişime geçin.', 'error');
+                    }
+                }
             } catch (error) {
                 showAlert('loginAlert', 'Giriş başarısız: ' + error.message, 'error');
             }
@@ -1034,6 +1060,7 @@
             if (isAdmin) {
                 document.getElementById('adminPanel').classList.remove('hidden');
                 document.getElementById('userPanel').classList.add('hidden');
+                loadUsers();
                 loadAdminPrices();
             } else {
                 document.getElementById('adminPanel').classList.add('hidden');
@@ -1080,15 +1107,23 @@
                     body: JSON.stringify({ 
                         email, 
                         password, 
-                        returnSecureToken: false
+                        returnSecureToken: true
                     })
                 });
 
                 const data = await response.json();
                 
-                if (data.email) {
+                if (data.localId) {
+                    // Kullanıcıyı veritabanına kaydet
+                    await database.ref('users/' + data.localId).set({
+                        email: email,
+                        createdAt: Date.now(),
+                        createdBy: currentUser.uid
+                    });
+                    
                     showAlert('userAlert', 'Kullanıcı başarıyla eklendi!', 'success');
                     document.getElementById('addUserForm').reset();
+                    loadUsers();
                 } else if (data.error) {
                     throw new Error(data.error.message);
                 } else {
@@ -1099,7 +1134,50 @@
             }
         });
 
+        // Load Users
+        function loadUsers() {
+            database.ref('users').on('value', snapshot => {
+                const tbody = document.getElementById('usersList');
+                tbody.innerHTML = '';
 
+                snapshot.forEach(child => {
+                    const user = child.val();
+                    const userId = child.key;
+                    
+                    // Admin kendisini gösterme
+                    if (userId === ADMIN_UID) return;
+                    
+                    const row = tbody.insertRow();
+                    const createdDate = new Date(user.createdAt).toLocaleDateString('tr-TR');
+                    
+                    row.innerHTML = `
+                        <td>${user.email}</td>
+                        <td>${createdDate}</td>
+                        <td>
+                            <button class="btn btn-danger btn-small" onclick="deleteUser('${userId}', '${user.email}')">🗑️ Sil</button>
+                        </td>
+                    `;
+                });
+            });
+        }
+
+        // Delete User
+        async function deleteUser(userId, email) {
+            if (confirm(`${email} adlı kullanıcıyı silmek istediğinizden emin misiniz?\n\nNot: Kullanıcı veritabanından silinecek ve bir daha giriş yapamayacaktır.`)) {
+                try {
+                    // 1. Kullanıcıyı veritabanından sil
+                    await database.ref('users/' + userId).remove();
+                    
+                    // 2. Firebase Authentication'dan silme (REST API ile)
+                    // Not: Bu işlem Firebase Admin SDK gerektirir ve client-side'dan tam olarak yapılamaz
+                    // Ancak kullanıcı veritabanından silindiği için giriş yapamayacak
+                    
+                    showAlert('userAlert', 'Kullanıcı başarıyla silindi! Artık sisteme giriş yapamayacaktır.', 'success');
+                } catch (error) {
+                    showAlert('userAlert', 'Hata: ' + error.message, 'error');
+                }
+            }
+        }
 
         // Add Part
         document.getElementById('addPartForm').addEventListener('submit', async (e) => {
@@ -1140,7 +1218,6 @@
                     const part = child.val();
                     const row = tbody.insertRow();
                     
-                    // Eski veriler için fallback
                     const priceEquivalent = part.priceEquivalent || part.price || 0;
                     const priceOriginal = part.priceOriginal || null;
                     
@@ -1159,7 +1236,7 @@
             });
         }
 
-        // Load User Prices (Fiyat Listesi)
+        // Load User Prices
         function loadUserPrices() {
             database.ref('parts').on('value', snapshot => {
                 const tbody = document.getElementById('userPricesList');
@@ -1169,7 +1246,6 @@
                     const part = child.val();
                     const row = tbody.insertRow();
                     
-                    // Eski veriler için fallback
                     const priceEquivalent = part.priceEquivalent || part.price || 0;
                     const priceOriginal = part.priceOriginal || null;
                     
@@ -1227,7 +1303,6 @@
                 const models = new Set();
                 snapshot.forEach(child => {
                     const part = child.val();
-                    // Büyük-küçük harf duyarsız karşılaştırma
                     if (part.brand.toLowerCase() === brand.toLowerCase()) {
                         models.add(part.model);
                     }
@@ -1265,7 +1340,6 @@
                 const parts = [];
                 snapshot.forEach(child => {
                     const part = child.val();
-                    // Büyük-küçük harf duyarsız karşılaştırma
                     if (part.brand.toLowerCase() === brand.toLowerCase() && 
                         part.model.toLowerCase() === model.toLowerCase()) {
                         parts.push({ key: child.key, ...part });
@@ -1275,13 +1349,10 @@
                 const container = document.getElementById('partsList');
                 container.innerHTML = '';
                 parts.forEach(part => {
-                    // Eski veriler için fallback
                     const priceEquivalent = part.priceEquivalent || part.price || 0;
                     const priceOriginal = part.priceOriginal || null;
                     
-                    // Eğer orijinal fiyat varsa, iki seçenek göster
                     if (priceOriginal) {
-                        // Orijinal seçeneği
                         const divOriginal = document.createElement('div');
                         divOriginal.className = 'checkbox-item';
                         divOriginal.innerHTML = `
@@ -1292,7 +1363,6 @@
                         `;
                         container.appendChild(divOriginal);
                         
-                        // Muadil seçeneği
                         const divEquivalent = document.createElement('div');
                         divEquivalent.className = 'checkbox-item';
                         divEquivalent.innerHTML = `
@@ -1303,7 +1373,6 @@
                         `;
                         container.appendChild(divEquivalent);
                     } else {
-                        // Sadece muadil varsa
                         const div = document.createElement('div');
                         div.className = 'checkbox-item';
                         div.innerHTML = `

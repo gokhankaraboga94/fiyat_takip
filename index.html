@@ -1223,10 +1223,14 @@
                 return;
             }
 
-            database.ref('parts').orderByChild('brand').equalTo(brand).once('value', snapshot => {
+            database.ref('parts').once('value', snapshot => {
                 const models = new Set();
                 snapshot.forEach(child => {
-                    models.add(child.val().model);
+                    const part = child.val();
+                    // Büyük-küçük harf duyarsız karşılaştırma
+                    if (part.brand.toLowerCase() === brand.toLowerCase()) {
+                        models.add(part.model);
+                    }
                 });
 
                 const select = document.getElementById('selectModel');
@@ -1261,7 +1265,9 @@
                 const parts = [];
                 snapshot.forEach(child => {
                     const part = child.val();
-                    if (part.brand === brand && part.model === model) {
+                    // Büyük-küçük harf duyarsız karşılaştırma
+                    if (part.brand.toLowerCase() === brand.toLowerCase() && 
+                        part.model.toLowerCase() === model.toLowerCase()) {
                         parts.push({ key: child.key, ...part });
                     }
                 });

@@ -790,13 +790,19 @@
                                     <label for="partModel">Model</label>
                                     <input type="text" id="partModel" placeholder="Örn: iPhone 14" required>
                                 </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="partName">Parça Adı</label>
+                                <input type="text" id="partName" placeholder="Örn: Ekran" required>
+                            </div>
+                            <div class="form-grid">
                                 <div class="form-group">
-                                    <label for="partName">Parça Adı</label>
-                                    <input type="text" id="partName" placeholder="Örn: Ekran" required>
+                                    <label for="partPriceOriginal">Orijinal Fiyat (₺) <span style="color: var(--text-gray); font-weight: 400;">(İsteğe bağlı)</span></label>
+                                    <input type="number" id="partPriceOriginal" placeholder="0.00" step="0.01">
                                 </div>
                                 <div class="form-group">
-                                    <label for="partPrice">Fiyat (₺)</label>
-                                    <input type="number" id="partPrice" placeholder="0.00" step="0.01" required>
+                                    <label for="partPriceEquivalent">Muadil Fiyat (₺)</label>
+                                    <input type="number" id="partPriceEquivalent" placeholder="0.00" step="0.01" required>
                                 </div>
                             </div>
                             
@@ -816,7 +822,8 @@
                                         <th>Marka</th>
                                         <th>Model</th>
                                         <th>Parça</th>
-                                        <th>Fiyat</th>
+                                        <th>Orijinal Fiyat</th>
+                                        <th>Muadil Fiyat</th>
                                         <th>İşlem</th>
                                     </tr>
                                 </thead>
@@ -883,7 +890,8 @@
                                         <th>Marka</th>
                                         <th>Model</th>
                                         <th>Parça</th>
-                                        <th>Fiyat</th>
+                                        <th>Orijinal Fiyat</th>
+                                        <th>Muadil Fiyat</th>
                                     </tr>
                                 </thead>
                                 <tbody id="userPricesList"></tbody>
@@ -1099,14 +1107,16 @@
             const brand = document.getElementById('partBrand').value;
             const model = document.getElementById('partModel').value;
             const name = document.getElementById('partName').value;
-            const price = parseFloat(document.getElementById('partPrice').value);
+            const priceOriginal = parseFloat(document.getElementById('partPriceOriginal').value) || null;
+            const priceEquivalent = parseFloat(document.getElementById('partPriceEquivalent').value);
 
             try {
                 const partData = {
                     brand,
                     model,
                     name,
-                    price,
+                    priceOriginal,
+                    priceEquivalent,
                     createdAt: Date.now()
                 };
 
@@ -1129,11 +1139,18 @@
                 snapshot.forEach(child => {
                     const part = child.val();
                     const row = tbody.insertRow();
+                    
+                    // Eski veriler için fallback
+                    const priceEquivalent = part.priceEquivalent || part.price || 0;
+                    const priceOriginal = part.priceOriginal || null;
+                    
+                    const originalPrice = priceOriginal ? `${priceOriginal.toFixed(2)} ₺` : '<span style="color: var(--text-gray);">-</span>';
                     row.innerHTML = `
                         <td>${part.brand}</td>
                         <td>${part.model}</td>
                         <td>${part.name}</td>
-                        <td>${part.price.toFixed(2)} ₺</td>
+                        <td>${originalPrice}</td>
+                        <td>${priceEquivalent.toFixed(2)} ₺</td>
                         <td>
                             <button class="btn btn-danger btn-small" onclick="deletePart('${child.key}')">🗑️ Sil</button>
                         </td>
@@ -1151,11 +1168,18 @@
                 snapshot.forEach(child => {
                     const part = child.val();
                     const row = tbody.insertRow();
+                    
+                    // Eski veriler için fallback
+                    const priceEquivalent = part.priceEquivalent || part.price || 0;
+                    const priceOriginal = part.priceOriginal || null;
+                    
+                    const originalPrice = priceOriginal ? `${priceOriginal.toFixed(2)} ₺` : '<span style="color: var(--text-gray);">-</span>';
                     row.innerHTML = `
                         <td>${part.brand}</td>
                         <td>${part.model}</td>
                         <td>${part.name}</td>
-                        <td>${part.price.toFixed(2)} ₺</td>
+                        <td>${originalPrice}</td>
+                        <td>${priceEquivalent.toFixed(2)} ₺</td>
                     `;
                 });
             });
@@ -1245,15 +1269,45 @@
                 const container = document.getElementById('partsList');
                 container.innerHTML = '';
                 parts.forEach(part => {
-                    const div = document.createElement('div');
-                    div.className = 'checkbox-item';
-                    div.innerHTML = `
-                        <input type="checkbox" id="part_${part.key}" value="${part.key}" onchange="validatePartSelection()">
-                        <label for="part_${part.key}" style="margin: 0; cursor: pointer; flex: 1;">
-                            ${part.name} - ${part.price.toFixed(2)} ₺
-                        </label>
-                    `;
-                    container.appendChild(div);
+                    // Eski veriler için fallback
+                    const priceEquivalent = part.priceEquivalent || part.price || 0;
+                    const priceOriginal = part.priceOriginal || null;
+                    
+                    // Eğer orijinal fiyat varsa, iki seçenek göster
+                    if (priceOriginal) {
+                        // Orijinal seçeneği
+                        const divOriginal = document.createElement('div');
+                        divOriginal.className = 'checkbox-item';
+                        divOriginal.innerHTML = `
+                            <input type="checkbox" id="part_${part.key}_original" value="${part.key}" data-price="${priceOriginal}" data-type="original" onchange="validatePartSelection()">
+                            <label for="part_${part.key}_original" style="margin: 0; cursor: pointer; flex: 1;">
+                                ${part.name} - <strong style="color: #16a34a;">🟢 Orijinal:</strong> ${priceOriginal.toFixed(2)} ₺
+                            </label>
+                        `;
+                        container.appendChild(divOriginal);
+                        
+                        // Muadil seçeneği
+                        const divEquivalent = document.createElement('div');
+                        divEquivalent.className = 'checkbox-item';
+                        divEquivalent.innerHTML = `
+                            <input type="checkbox" id="part_${part.key}_equivalent" value="${part.key}" data-price="${priceEquivalent}" data-type="equivalent" onchange="validatePartSelection()">
+                            <label for="part_${part.key}_equivalent" style="margin: 0; cursor: pointer; flex: 1;">
+                                ${part.name} - <strong style="color: #f59e0b;">🟡 Muadil:</strong> ${priceEquivalent.toFixed(2)} ₺
+                            </label>
+                        `;
+                        container.appendChild(divEquivalent);
+                    } else {
+                        // Sadece muadil varsa
+                        const div = document.createElement('div');
+                        div.className = 'checkbox-item';
+                        div.innerHTML = `
+                            <input type="checkbox" id="part_${part.key}_equivalent" value="${part.key}" data-price="${priceEquivalent}" data-type="equivalent" onchange="validatePartSelection()">
+                            <label for="part_${part.key}_equivalent" style="margin: 0; cursor: pointer; flex: 1;">
+                                ${part.name} - <strong style="color: #f59e0b;">🟡 Muadil:</strong> ${priceEquivalent.toFixed(2)} ₺
+                            </label>
+                        `;
+                        container.appendChild(div);
+                    }
                 });
 
                 document.getElementById('partsGroup').style.display = 'block';
@@ -1285,16 +1339,17 @@
                 return;
             }
 
-            const partKeys = Array.from(checkboxes).map(cb => cb.value);
             let total = 0;
             const breakdown = [];
 
-            for (const key of partKeys) {
-                const snapshot = await database.ref('parts/' + key).once('value');
-                const part = snapshot.val();
-                total += part.price;
-                breakdown.push({ name: part.name, price: part.price });
-            }
+            checkboxes.forEach(cb => {
+                const price = parseFloat(cb.getAttribute('data-price'));
+                const type = cb.getAttribute('data-type');
+                const label = cb.nextElementSibling.textContent.trim();
+                
+                total += price;
+                breakdown.push({ name: label, price: price });
+            });
 
             document.getElementById('totalPrice').textContent = total.toFixed(2) + ' ₺';
             

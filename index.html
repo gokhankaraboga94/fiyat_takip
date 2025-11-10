@@ -766,20 +766,7 @@
                         </form>
                     </div>
 
-                    <div class="card">
-                        <h2 class="card-title">Kullanıcı Listesi</h2>
-                        <div class="table-container">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>E-posta</th>
-                                        <th>Kayıt Tarihi</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="usersList"></tbody>
-                            </table>
-                        </div>
-                    </div>
+
                 </div>
 
                 <!-- Parts Tab -->
@@ -988,7 +975,6 @@
             if (isAdmin) {
                 document.getElementById('adminPanel').classList.remove('hidden');
                 document.getElementById('userPanel').classList.add('hidden');
-                loadUsers();
                 loadAdminPrices();
             } else {
                 document.getElementById('adminPanel').classList.add('hidden');
@@ -1044,7 +1030,6 @@
                 if (data.email) {
                     showAlert('userAlert', 'Kullanıcı başarıyla eklendi!', 'success');
                     document.getElementById('addUserForm').reset();
-                    loadUsers();
                 } else if (data.error) {
                     throw new Error(data.error.message);
                 } else {
@@ -1055,11 +1040,7 @@
             }
         });
 
-        // Load Users
-        async function loadUsers() {
-            const tbody = document.getElementById('usersList');
-            tbody.innerHTML = '<tr><td colspan="2">Kullanıcı listesi API ile yüklenemez</td></tr>';
-        }
+
 
         // Add Part
         document.getElementById('addPartForm').addEventListener('submit', async (e) => {
